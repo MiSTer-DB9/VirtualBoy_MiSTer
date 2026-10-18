@@ -465,6 +465,7 @@ module emu
 		"P2-;",
 		"P2F4,VBT,Load Brightness Table;",
 		"P2-;",
+		"P2O[20],User IO,Off,SNAC (Controller);",
 		"P2O[40],Enable Large SRAM,Off,On;",
 		"P2O[28],Serial Port,Rumble,None;",
 		"P2O[44],Savestates to SD Card,On,Off;",
@@ -489,7 +490,7 @@ wire   [1:0] joy_type_raw    = status[127:126]; // 0=Off, 1=Saturn, 2=DB9MD, 3=D
 wire         joy_2p          = 1'b0;          // 1P-only: joy_2p unused
 // SNAC cores: replace 1'b0 with the core's SNAC enable expression so SNAC
 // preempts the joydb wrapper on shared USER_IO pins. Default 1'b0 is no-op.
-wire         snac_active     = 1'b0;
+wire         snac_active     = status[20] && !tas_pad_override; // SNES-style SNAC pad on USER_IO
 // MT32-pi cores on primary USER_IO: replace 1'b0 with the core's MT32-active
 // expression (e.g. `mt32_use` under `ifndef SECOND_MT32`, `~mt32_disable` for
 // TRS-80's inverted polarity). Suppresses the OSD-open autodetect probe so it
@@ -556,7 +557,9 @@ joydb joydb (
   .joy_raw         ( joy_raw_payload )
 );
 
-assign USER_OUT = USER_OUT_DRIVE;
+// SNAC pad owns USER_IO[6:0] while SNAC is on.
+wire   [6:0] USER_OUT_SNAC;
+assign USER_OUT = snac_active ? {1'b1, USER_OUT_SNAC} : USER_OUT_DRIVE;
 // [MiSTer-DB9 END]
 
 // [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: rename USB joystick wires
@@ -1704,6 +1707,29 @@ assign joystick_0 = joydb_1ena ? (OSD_STATUS ? 16'b0 : joydb_1_mapped) : joystic
 	};
 	wire [15:0] core_pad_buttons = tas_pad_override ? tas_pad_word : pad_buttons;
 
+	// SNAC uses the same signal pins as SNES SNAC:
+	// USER1 / USB 3.0 D- = clock, USER0 / USB 3.0 D+ = latch,
+	// USER5 / USB 3.0 RX- = data.
+	// USER_OUT is open-drain: one releases a pin and zero pulls it low.
+	// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: snac_active is declared by the joydb wrapper (same expression)
+	//wire       snac_active = status[20] && !tas_pad_override;
+	// [MiSTer-DB9 END]
+	wire       snac_pad_clock;
+	reg  [1:0] snac_data_sync_q = 2'b11;
+
+	always @(posedge clk_sys) begin
+		if (!snac_active)
+			snac_data_sync_q <= 2'b11;
+		else
+			snac_data_sync_q <= {snac_data_sync_q[0], USER_IN[5]};
+	end
+
+	// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: SNAC drive composed into USER_OUT with joydb
+	assign USER_OUT_SNAC[0]   = snac_active ? tas_pad_latch : 1'b1;
+	assign USER_OUT_SNAC[1]   = snac_active ? snac_pad_clock : 1'b1;
+	assign USER_OUT_SNAC[6:2] = 5'b11111;
+	// [MiSTer-DB9 END]
+
 	localparam [1:0] EYE_DRAW_LEFT         = 2'd0;
 	localparam [1:0] EYE_DRAW_RIGHT        = 2'd1;
 	localparam [1:0] EYE_DRAW_SIDE_BY_SIDE = 2'd3;
@@ -1771,6 +1797,8 @@ assign joystick_0 = joydb_1ena ? (OSD_STATUS ? 16'b0 : joydb_1_mapped) : joystic
 		.cheat_code_i                  (cheat_code),
 
 		.pad_buttons_i                 (core_pad_buttons),
+		.pad_serial_enable_i           (snac_active),
+		.pad_serial_i                  (snac_data_sync_q[1]),
 		.cart_irq_i                    (1'b0),
 		.rumble_enable_i               (serial_rumble_enable),
 		.link_comcnt_i                 (1'b1),
@@ -1789,7 +1817,7 @@ assign joystick_0 = joydb_1ena ? (OSD_STATUS ? 16'b0 : joydb_1_mapped) : joystic
 		.brightness_table_data_i       (brightness_table_data),
 
 		.pad_latch_o                   (tas_pad_latch),
-		.pad_clock_o                   (),
+		.pad_clock_o                   (snac_pad_clock),
 		.link_comcnt_o                 (),
 		.link_clk_o                    (),
 		.link_tx_o                     (),

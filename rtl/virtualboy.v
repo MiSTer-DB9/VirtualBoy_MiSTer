@@ -45,6 +45,8 @@ module virtualboy
 	input  wire [128:0] cheat_code_i,
 
 	input  wire [15:0]  pad_buttons_i,
+	input  wire         pad_serial_enable_i,
+	input  wire         pad_serial_i,
 	input  wire         cart_irq_i,
 	input  wire         rumble_enable_i,
 	input  wire         link_comcnt_i,
@@ -608,6 +610,8 @@ module virtualboy
 		.ce_i                    (core_ce_w),
 
 		.pad_sample_i            (pad_sample_w),
+		.pad_serial_enable_i     (pad_serial_enable_i),
+		.pad_serial_i            (pad_serial_i),
 		.rumble_enable_i         (rumble_enable_i),
 		.link_comcnt_i           (link_comcnt_eff_w),
 		.link_clk_i              (link_clk_eff_w),
